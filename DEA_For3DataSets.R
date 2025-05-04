@@ -304,7 +304,7 @@ legend("topleft", legend=c("Not significant", "Upregulated", "Downregulated"),
 #saveRDS(negativecontrol, '~/Desktop/NegativeControlToLoad.RDS')
 
 #-------------------------------------------------------------------------------------------------------------------
-#                Done
+#                Done - this section for CD45.2 condition
 #-------------------------------------------------------------------------------------------------------------------
 
 #For Half Dose CD45.2
@@ -323,5 +323,267 @@ topTable <- topTags(lrt, n=Inf)$table
 
 upregulated_miRNAs_for_HalfDosecd45.2 <- topTable[topTable$logFC > 0 & topTable$FDR < 0.05, ]
 print(upregulated_miRNAs_for_HalfDosecd45.2)
+
+
+
+#-------------------------------------------------------------------------------------------------------------------
+#                      BAR GRAPH FOR CD45.1 FD AND CD45.1 HD CONDITIONS
+#-------------------------------------------------------------------------------------------------------------------
+
+
+library(IRanges)
+library(Rsubread)
+library("edgeR")
+library("statmod")
+library(limma)
+
+
+
+counts_matrix <- readRDS('~/Desktop/R_codes_Final_for_Diss/miRNA_counts_of_ALL_data.rds')
+counts_matrix
+byLane <- split(colnames(counts_matrix), sub("_L1|_L2","",colnames(counts_matrix)))
+counts <- matrix(data=0, nrow=nrow(counts_matrix), ncol=length(byLane))
+rownames(counts) <- rownames(counts_matrix)
+colnames(counts) <- names(byLane)
+for (n in names(byLane)) {
+  print(n)
+  counts[,n] <- rowSums(counts_matrix[,byLane[[n]],drop=FALSE])
+}
+
+counts
+mirna_counts <- counts[grepl("^mmu-", rownames(counts)), ] #Okay so just to let u know this babe is getting only the miRNAs from the counts 
+dim(mirna_counts) #okay damn i dropped so many of them crazy (i now have 1966 miRNAs)
+round(colSums(mirna_counts) / 1e6, 1)
+
+keep_mirna <- rowSums(cpm(mirna_counts) >= 1) >= 2  
+print(table(keep_mirna))
+filtered_cpm_mirna <- mirna_counts[keep_mirna, ]
+
+dim(filtered_cpm_mirna) #so now u have 589 possible miRNAs damn so little but more than before okay slay maybe this is a good sign okay eat it up
+
+colnames(filtered_cpm_mirna) #see what they are called 
+group <- factor(gsub("_r\\d+\\.for_counting.bam$", "", colnames(filtered_cpm_mirna)))
+print(group) #now they are divided into the 6 conditions that i acc have
+table(group) #and i can see that i have three replicated in each condition
+
+#now we make a dge list for this whole thing
+dge <- DGEList(counts=filtered_cpm_mirna, group=group) #just to be aware by data has not been normalized 
+dge
+
+#define the colors by the 6 conditions we have which is the 6 groups
+colors <- rainbow(length(levels(group))) 
+names(colors) <- levels(group)
+colors #and they are defined i think this is crazy
+
+#lets get to the analysis - first: an MDS plot lets see where these samples are at
+par(mfrow=c(1,1))
+#then we plot it
+#pdf('MDSplotnotnormalizsed.pdf')
+plotMDS(dge, col = colors[group], main = "MDS Plot not yet normalized")
+legend("topright", legend = levels(group), col = colors, pch = 19, title = "Groups")
+#dev.off()
+
+#pdf('MDSplotnotnormalizsed_points.pdf')
+plotMDS(dge, 
+        col = colors[group],
+        main = "MDS Plot not yet normalized",
+        pch = 16)
+legend("topright", legend = levels(group), col = colors, pch = 19, title = "Groups",  xpd = TRUE, inset = c(0.0009, -0.05) )
+#dev.off()
+
+
+#DATA Normalized !!!!!! 
+dge <- calcNormFactors(dge)
+dge$samples
+
+#pdf('MDSplotnormalized_points.pdf')
+plotMDS(dge, 
+        col = colors[group],
+        main = "MDS Plot of all Datasets Normalized",
+        pch = 16)
+legend("topright", legend = levels(group), col = colors, pch = 19, title = "Groups",  xpd = TRUE, inset = c(0.0009, -0.05) )
+#dev.off()
+
+#check the samples (not sure important cause my data is quite like not like idk i guess they look alright) this is not too important if im being honest 
+par(mfrow=c(1,2))
+
+for (i in c(3,4,5)) {
+  plotMD(cpm(dge, log=TRUE), column=i)
+  grid(col = "blue")
+  abline(h=0, col='red', lty=2, lwd=2)
+}
+
+#then we are making the design so we can make the BCV plot wich is not looking so good
+design <- model.matrix(~0+dge$samples$group)
+colnames(design) <- levels(dge$samples$group)
+design
+
+
+#pdf('bcvplot.pdf')
+par(mar = c(6, 6, 4, 2))
+dge <- estimateDisp(dge, design = design, robust = TRUE) #this is to estimate dispersion so that i can calculate the plot BCV
+par(mfrow=c(1,1))
+plotBCV(dge, main='Analysis of Full Data Set BCV plot') 
+#dev.off()
+
+contrasts <- makeContrasts(
+  'FullDose'= 'FD_imp_Flag - FD_res_AGO2',
+  'HalfDose_CD45.1' ='HD_imp_Flag - HD_res_AGO2',
+  'HalfDose_CD45.2'= 'HD_imp_AGO2 - HD_res_Flag',
+  levels = design
+)
+
+contrasts
+contrast_fulldose <- contrasts[,1]
+contrast_fulldose
+
+contrast_halfdoseCD45.1 <- contrasts[,2]
+contrast_halfdoseCD45.1
+
+contrast_halfdoseCD45.2 <- contrasts[,3]
+contrast_halfdoseCD45.2
+
+#For Full Dose
+fit <- glmFit(dge, dispersion = dge$tagwise.dispersion) #explain why I used the tagwise dispersion instead of the remember that it  
+lrt <- glmLRT (fit, contrast = contrast_fulldose)
+
+
+decidetestFD <- decideTests(lrt, adjust.method="BH", p.value=0.05, lfc=0)
+table(decidetestFD) #19 miRNAs upregulates
+
+topTable <- topTags(lrt, n=Inf)$table
+topTable
+
+upregulated_miRNAs_for_FullDose <- topTable[topTable$logFC > 0 & topTable$FDR < 0.05, ]
+print(upregulated_miRNAs_for_FullDose)
+
+important_miRNAs <- c("mmu-miR-3068-3p", "mmu-miR-3535",
+                      "mmu-miR-126a-5p", "mmu-miR-199a-3p", "mmu-miR-205-5p", 
+                      "mmu-miR-5099", "mmu-miR-5121")
+
+
+miRNA_positions <- topTable[important_miRNAs, c("logFC", "FDR")]
+miRNA_positions$negFDR <- -log10(miRNA_positions$FDR)
+
+#pdf('Volcano plot cd45.1 FD.pdf')
+plot(topTable$logFC, -log10(topTable$FDR), pch=19, 
+     col = ifelse(topTable$logFC > 1, "red", ifelse(topTable$logFC < -1, "blue", "black")),
+     main = "Volcano Plot for CD45.1 Donor Cells FullDose", 
+     xlim = c(-8, 12), ylim = c(0, 12),
+     xlab = "Log Fold Change (logFC)", ylab = "-log10(FDR)")
+
+
+miRNA_positions
+points(miRNA_positions$logFC, miRNA_positions$negFDR, pch=19, col="red", cex=1)
+text(miRNA_positions$logFC, miRNA_positions$negFDR, 
+     labels = rownames(miRNA_positions), 
+     pos = 4, col = "red", cex = 0.6, offset = 0.1)
+#dev.off()
+
+
+#For Half Dose CD45.1
+fit <- glmFit(dge, dispersion = dge$tagwise.dispersion) #explain why I used the common dispersion instead of the trend 
+lrt <- glmLRT (fit, contrast = contrast_halfdoseCD45.1)
+topTags(lrt)
+
+decidetestHDcd45.1 <- decideTests(lrt, adjust.method="BH", p.value=0.05, lfc=0)
+table(decidetestHDcd45.1) #11 miRNAs upregulated
+
+topTable <- topTags(lrt, n=Inf)$table
+topTable
+
+upregulated_miRNAs_for_HalfDosecd45.1 <- topTable[topTable$logFC > 0 & topTable$FDR < 0.05, ]
+print(upregulated_miRNAs_for_HalfDosecd45.1)
+
+#pdf('Volcano plot cd45.1 HD')
+plot(topTable$logFC, -log10(topTable$FDR), pch=19, 
+     col = ifelse(topTable$logFC > 1, "red", ifelse(topTable$logFC < -1, "blue", "black")),
+     main = "Volcano Plot for CD45.1 Donor Cells HalfDose", 
+     xlim = c(-8, 12), ylim = c(0, 12),
+     xlab = "Log Fold Change (logFC)", ylab = "-log10(FDR)")
+
+
+miRNA_positions
+points(miRNA_positions$logFC, miRNA_positions$negFDR, pch=19, col="red", cex=1)
+text(miRNA_positions$logFC, miRNA_positions$negFDR, 
+     labels = rownames(miRNA_positions), 
+     pos = 4, col = "red", cex = 0.6, offset = 0.1)
+#dev.off()
+
+nrow(upregulated_miRNAs_for_FullDose)
+nrow(upregulated_miRNAs_for_HalfDosecd45.1)
+
+FullDose <- upregulated_miRNAs_for_FullDose['logFC']
+HalfDose <- upregulated_miRNAs_for_HalfDosecd45.1['logFC']
+
+HalfDose_df <- data.frame(miRNA = rownames(HalfDose), logFC_HalfDose = HalfDose$logFC)
+
+FullDose_df <- data.frame(miRNA = rownames(FullDose), logFC_HalfDose = FullDose$logFC)
+HalfDose_df
+
+# Assuming HalfDose_df already exists and has a miRNA column
+
+
+library(dplyr)
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Your combined data
+data <- data.frame(
+  miRNA = c(HalfDose_df$miRNA, FullDose_df$miRNA),
+  logFC_HalfDose_CD45.1 = c(HalfDose_df$logFC, rep(0, length(FullDose_df$miRNA))),
+  logFC_FullDose = c(rep(0, length(HalfDose_df$miRNA)), FullDose_df$logFC)
+)
+
+# Combine data and keep the max values
+combined_data <- data %>%
+  group_by(miRNA) %>%
+  summarize(
+    logFC_HalfDose_CD45.1 = max(logFC_HalfDose_CD45.1, na.rm = TRUE),
+    logFC_FullDose = max(logFC_FullDose, na.rm = TRUE)
+  )
+
+# Reshape to long format for plotting
+long_data <- combined_data %>%
+  pivot_longer(cols = starts_with("logFC"),
+               names_to = "Dose",
+               values_to = "logFC")
+
+
+
+#pdf('~/Desktop/Upregulated miRNAs.pdf')
+ggplot(long_data, aes(y = miRNA, x = logFC, fill = Dose)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.7)) +  # Explicit dodge
+  labs(title = "Upregulated miRNA for FD and HD CD45.1 Cells",
+       y = "miRNA", x = "logFC",
+       caption = expression("FDR" <= 0.05 ~ "for all displayed miRNAs")) +
+  scale_fill_manual(values = c("logFC_HalfDose_CD45.1" = 'royalblue3', "logFC_FullDose" = "lightpink")) +
+  theme_minimal() +
+  theme( axis.title.y = element_text(margin = margin(r = 25))  # pushes label further left
+  )
+#dev.off()
+colors()
+
+#the other way if i want it
+ggplot(long_data, aes(x = miRNA, y = logFC, fill = Dose)) +
+  
+  geom_bar(stat = "identity", position = "dodge") +
+  
+  labs(title = "Bar Plot of logFC for HalfDose and FullDose",
+       
+       x = "miRNA", y = "logFC") +
+  
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + # Vertical labels
+  
+  scale_fill_manual(values = c("logFC_HalfDose" = "blue", "logFC_FullDose" = "pink")) 
+  
+
+#lets make a volcano plot
+BiocManager::install("EnhancedVolcano")
+library(EnhancedVolcano)
+
 
 
